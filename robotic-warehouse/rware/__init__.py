@@ -1,6 +1,6 @@
 import itertools
 
-from gymnasium import register
+from gymnasium import register, spec
 
 from rware.warehouse import ObservationType, RewardType, Task, TaskManager, TaskPhase
 
@@ -71,6 +71,15 @@ register(
         "reward_type": RewardType.INDIVIDUAL,
         "task_manager_enabled": True,
     },
+)
+
+
+register(
+    id="rware-custom-5ag-routing-v2",
+    entry_point="rware.warehouse:Warehouse",
+    disable_env_checker=True,
+    kwargs={**spec("rware-custom-5ag-v2").kwargs,
+            "routing_features_enabled": True, "sensor_range": 2},
 )
 
 

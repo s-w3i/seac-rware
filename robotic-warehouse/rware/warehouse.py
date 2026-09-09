@@ -1,4 +1,4 @@
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Tuple, Optional, Dict
@@ -288,6 +288,14 @@ class Warehouse(gym.Env):
         normalised_coordinates: bool = False,
         render_mode: Optional[str] = None,
         task_manager_enabled: bool = False,
+        routing_features_enabled: bool = False,
+        progress_weight: float = 0.1,
+        step_cost: float = 0.01,
+        conflict_cost: float = 0.1,
+        stall_cost: float = 0.2,
+        pickup_reward: float = 1.0,
+        delivery_reward: float = 2.0,
+        return_reward: float = 3.0,
     ):
         """The robotic warehouse environment
 
@@ -373,6 +381,17 @@ class Warehouse(gym.Env):
 
         self.normalised_coordinates = normalised_coordinates
         self.task_manager_enabled = bool(task_manager_enabled)
+        self.routing_features_enabled = bool(routing_features_enabled)
+        if self.routing_features_enabled and (
+            not self.task_manager_enabled or reward_type != RewardType.INDIVIDUAL
+            or observation_type not in (ObservationType.FLATTENED, ObservationType.DICT) or msg_bits
+        ):
+            raise ValueError("Routing requires tasks, individual rewards, dictionary/flattened observations and no messages")
+        self.progress_weight, self.step_cost = progress_weight, step_cost
+        self.conflict_cost, self.stall_cost = conflict_cost, stall_cost
+        self.pickup_reward, self.delivery_reward, self.return_reward = pickup_reward, delivery_reward, return_reward
+        if self.routing_features_enabled:
+            self.reward_range = (-float("inf"), float("inf"))
         self.task_manager = TaskManager(self) if self.task_manager_enabled else None
         self._deadlock_stall_steps = 0
         self._deadlock_active = False
@@ -569,7 +588,7 @@ class Warehouse(gym.Env):
             + self._obs_sensor_locations * self._obs_bits_per_shelf
         )
         if self.task_manager_enabled:
-            self._obs_length += 8
+            self._obs_length += 8 + (8 if self.routing_features_enabled else 0)
 
         max_grid_val = max(self.grid_size)
         low = np.zeros(2)
@@ -634,6 +653,13 @@ class Warehouse(gym.Env):
                         }
                     )
                 )
+            if self.routing_features_enabled:
+                fields["task"].spaces.update(OrderedDict(
+                    (key, gym.spaces.Box(0.0, 1.0, (size,), np.float32))
+                    for key, size in (("distance", 1), ("previous_action", 4),
+                                      ("movement_success", 1), ("blocked_streak", 1),
+                                      ("previous_distance", 1))
+                ))
             per_agent_spaces.append(gym.spaces.Dict(fields))
         return gym.spaces.Tuple(tuple(per_agent_spaces))
 
@@ -671,7 +697,39 @@ class Warehouse(gym.Env):
             ],
             dtype=np.float32,
         )
-        return {"phase": phase, "target_delta": delta}
+        result = {"phase": phase, "target_delta": delta}
+        if self.routing_features_enabled:
+            i = agent.id - 1
+            scale = np.prod(self.grid_size)
+            result.update(distance=np.array([self._distances[i] / scale], np.float32),
+                          previous_action=self._previous_actions[i].copy(),
+                          movement_success=np.array([self._movement_success[i]], np.float32),
+                          blocked_streak=np.array([min(self._blocked_streak[i], 10) / 10], np.float32),
+                          previous_distance=np.array([self._previous_distances[i] / scale], np.float32))
+        return result
+
+    def _static_distance(self, start, target, loaded, home):
+        """Fixed reset-layout translation distance; ignores traffic and rack vacancies."""
+        blocked = self._rack_positions - {start, home} if loaded else set()
+        queue = deque([(start, 0)])
+        seen = {start}
+        height, width = self.grid_size
+        while queue:
+            (x, y), distance = queue.popleft()
+            if (x, y) == target:
+                return distance
+            for point in ((x-1, y), (x+1, y), (x, y-1), (x, y+1)):
+                if (0 <= point[0] < width and 0 <= point[1] < height
+                        and point not in blocked and point not in seen):
+                    seen.add(point)
+                    queue.append((point, distance + 1))
+        return height * width
+
+    def _routing_context(self, i):
+        task = self.task_manager.tasks[i]
+        return (self.task_manager.target(task), self.agents[i].carrying_shelf is not None,
+                task.return_position)
+
 
     def _make_img_obs(self, agent):
         # write image observations
@@ -822,8 +880,8 @@ class Warehouse(gym.Env):
                     )  # shelf presence and request status
             if self.task_manager_enabled:
                 task_obs = self._task_observation(agent)
-                obs.write(task_obs["phase"])
-                obs.write(task_obs["target_delta"])
+                for value in task_obs.values():
+                    obs.write(value)
             return obs.vector
 
         # write dictionary observations
@@ -870,6 +928,12 @@ class Warehouse(gym.Env):
                     int(self.shelfs[id_ - 1] in self.request_queue)
                 ]
 
+        if self.routing_features_enabled:
+            if self.normalised_coordinates:
+                obs["self"]["location"] = np.array([agent_x, agent_y], dtype=np.float32)
+            if not self.msg_bits:
+                for sensor in obs["sensors"]:
+                    sensor.pop("local_message", None)
         if self.task_manager_enabled:
             obs["task"] = self._task_observation(agent)
 
@@ -907,7 +971,7 @@ class Warehouse(gym.Env):
 
     def _empty_metrics(self):
         zeros = np.zeros(self.n_agents, dtype=np.int64)
-        return {
+        metrics = {
             "completed_cycles": zeros.copy(),
             "deliveries": zeros.copy(),
             "pickup_time": zeros.copy(),
@@ -919,6 +983,11 @@ class Warehouse(gym.Env):
             "movement_denied": zeros.copy(),
             "deadlock_events": 0,
         }
+        if self.routing_features_enabled:
+            for key in ("pickups", "cycle_time", "robot_blocked", "reward_progress",
+                        "reward_step", "reward_conflict", "reward_stall", "reward_event"):
+                metrics[key] = np.zeros(self.n_agents, dtype=np.float64)
+        return metrics
 
     def _recalc_grid(self):
         self.grid[:] = 0
@@ -979,6 +1048,17 @@ class Warehouse(gym.Env):
                 )
             )
 
+        if self.routing_features_enabled:
+            self._rack_positions = {(s.x, s.y) for s in self.shelfs}
+            self._previous_actions = np.zeros((self.n_agents, 4), np.float32)
+            self._movement_success = np.zeros(self.n_agents)
+            self._blocked_streak = np.zeros(self.n_agents, dtype=np.int64)
+            self._cycle_steps = np.zeros(self.n_agents, dtype=np.int64)
+            self._distances = np.array([
+                self._static_distance((a.x, a.y), *self._routing_context(i))
+                for i, a in enumerate(self.agents)
+            ])
+            self._previous_distances = self._distances.copy()
         return tuple([self._make_obs(agent) for agent in self.agents]), self._get_info()
 
     def step(
@@ -1014,6 +1094,13 @@ class Warehouse(gym.Env):
         if self.task_manager_enabled:
             self.task_manager.begin_step()
 
+        if self.routing_features_enabled:
+            contexts = [self._routing_context(i) for i in range(self.n_agents)]
+            phases = [task.phase for task in self.task_manager.tasks]
+            automatic = np.array([phase in (TaskPhase.AUTO_PICKUP, TaskPhase.AUTO_DELIVERY,
+                                           TaskPhase.AUTO_DROP) for phase in phases])
+            effective_actions = [a.req_action.value for a in self.agents]
+            self._cycle_steps += 1
         before_positions = [(agent.x, agent.y) for agent in self.agents]
         before_directions = [agent.dir for agent in self.agents]
         requested_forward = np.array(
@@ -1044,6 +1131,9 @@ class Warehouse(gym.Env):
 
         G = nx.DiGraph()
 
+        physically_valid = requested_forward & np.array([
+            start != target for start, target in zip(before_positions, requested_targets)
+        ])
         for agent in self.agents:
             start = agent.x, agent.y
             target = agent.req_location(self.grid_size)
@@ -1059,6 +1149,7 @@ class Warehouse(gym.Env):
                     ].carrying_shelf
                 )
             ):
+                physically_valid[agent.id - 1] = False
                 # there's a standing shelf at the target location
                 # our agent is carrying a shelf so there's no way
                 # this movement can succeed. Cancel it.
@@ -1190,9 +1281,20 @@ class Warehouse(gym.Env):
         orientation_changed = any(
             before != agent.dir for before, agent in zip(before_directions, self.agents)
         )
+        if self.routing_features_enabled:
+            robot_blocked = physically_valid & (movement_denied == 1)
+            self._blocked_streak = np.where(robot_blocked, self._blocked_streak + 1, 0)
+            wait_steps = np.array([
+                not automatic[i] and (action == Action.NOOP.value or movement_denied[i])
+                for i, action in enumerate(effective_actions)
+            ], dtype=np.int64)
         stalled = bool(
             requested_forward.any() and not path_length.any() and not orientation_changed
         )
+        if self.routing_features_enabled:
+            phase_progress = any(old != task.phase for old, task in zip(phases, self.task_manager.tasks))
+            stalled = bool(robot_blocked.any() and not path_length.any()
+                           and not orientation_changed and not phase_progress)
         self._deadlock_stall_steps = self._deadlock_stall_steps + 1 if stalled else 0
         deadlock_event = int(self._deadlock_stall_steps == 10 and not self._deadlock_active)
         self._deadlock_active = self._deadlock_stall_steps >= 10
@@ -1208,6 +1310,37 @@ class Warehouse(gym.Env):
             "movement_denied": movement_denied,
             "deadlock_events": deadlock_event,
         }
+
+        if self.routing_features_enabled:
+            pickups = np.array([p == TaskPhase.AUTO_PICKUP for p in phases], dtype=np.int64)
+            cycle_time = self._cycle_steps * completed_cycles
+            self._cycle_steps[completed_cycles.astype(bool)] = 0
+            progress = np.zeros(self.n_agents)
+            previous = self._distances.copy()
+            for i, agent in enumerate(self.agents):
+                context = contexts[i]
+                after = previous[i] if automatic[i] else self._static_distance(after_positions[i], *context)
+                if not automatic[i] and max(previous[i], after) < np.prod(self.grid_size):
+                    progress[i] = self.progress_weight * (previous[i] - after)
+                new_context = self._routing_context(i)
+                if context != new_context:
+                    after = self._static_distance(after_positions[i], *new_context)
+                    previous[i] = after
+                self._distances[i] = after
+            self._previous_distances = previous
+            self._previous_actions = np.eye(4, dtype=np.float32)[effective_actions]
+            self._movement_success = path_length.copy()
+            components = {
+                "reward_progress": progress,
+                "reward_step": np.full(self.n_agents, -self.step_cost),
+                "reward_conflict": -self.conflict_cost * robot_blocked,
+                "reward_stall": -self.stall_cost * (self._blocked_streak >= 10),
+                "reward_event": self.pickup_reward * pickups + self.delivery_reward * deliveries
+                                + self.return_reward * completed_cycles,
+            }
+            rewards = sum(components.values())
+            self._last_info.update(components, pickups=pickups, cycle_time=cycle_time,
+                                   robot_blocked=robot_blocked.astype(np.int64))
 
         if shelf_delivered:
             self._cur_inactive_steps = 0

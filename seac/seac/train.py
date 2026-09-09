@@ -81,14 +81,22 @@ def _resolve_device(configured_device):
     return torch.device(configured_device)
 
 def _squash_info(info):
-    info = [i for i in info if i]
-    new_info = {}
-    keys = set([k for i in info for k in i.keys()])
-    keys.discard("TimeLimit.truncated")
-    for key in keys:
-        mean = np.mean([np.array(d[key]).sum() for d in info if key in d])
-        new_info[key] = mean
-    return new_info
+    episodes = [i for i in info if "episode_reward" in i]
+    rows = [{**{key: value for key, value in item.items()
+                if key in ("episode_reward", "episode_length", "episode_time")
+                or key.endswith("/episode_reward")},
+             **item.get("episode_metrics", {})} for item in episodes]
+    result = {key: np.mean([np.asarray(row[key]).sum() for row in rows if key in row])
+              for key in set().union(*(row.keys() for row in rows))}
+    for mean, count in (("mean_pickup_time", "pickups"), ("mean_delivery_time", "deliveries"),
+                        ("mean_return_time", "completed_cycles"), ("mean_cycle_time", "completed_cycles")):
+        completed = [row for row in rows if mean in row and row.get(count, 0) > 0]
+        if completed:
+            result[mean] = sum(row[mean] * row[count] for row in completed) / sum(row[count] for row in completed)
+    if rows and "cycles_per_1000_steps" in result:
+        result["cycles_per_1000_steps"] = 1000 * sum(row.get("completed_cycles", 0) for row in rows) / sum(row["episode_length"] for row in rows)
+    return result
+
 
 
 @ex.capture
@@ -103,6 +111,7 @@ def evaluate(
     time_limit,
     algorithm,
     _log,
+    _run,
 ):
     device = _resolve_device(algorithm["device"])
 
@@ -154,6 +163,8 @@ def evaluate(
 
     eval_envs.close()
     info = _squash_info(all_infos)
+    for key, value in info.items():
+        _run.log_scalar(f"evaluation/{key}", value)
     _log.info(
         f"Evaluation using {len(all_infos)} episodes: mean reward {info['episode_reward']:.5f}\n"
     )
@@ -267,7 +278,7 @@ def main(
                 )
 
             for info in infos:
-                if info:
+                if "episode_reward" in info:
                     all_infos.append(info)
 
         # value_loss, action_loss, dist_entropy = agent.update(rollouts)

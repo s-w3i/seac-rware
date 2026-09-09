@@ -1,0 +1,5 @@
+env_name: rware-custom-5ag-routing-v2
+num_env_steps: 40000000.0
+time_limit: 500
+algorithm:
+  device: cuda:0

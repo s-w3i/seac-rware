@@ -1,0 +1,12 @@
+env_name: rware-custom-5ag-v2
+num_env_steps: 40
+time_limit: 20
+dummy_vecenv: true
+log_interval: 1
+save_interval: null
+eval_interval: null
+loss_dir: null
+algorithm:
+  num_processes: 1
+  num_steps: 5
+  device: cuda:0

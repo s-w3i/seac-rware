@@ -135,7 +135,9 @@ To launch Phase 0 and Phase 2 as separate training processes on a host machine:
 ./scripts/run_phase0_phase2.sh
 ```
 
-Each process writes separate logs, models, videos, and TensorBoard output under
+Phase 0 uses the original feedforward SEAC on `rware-custom-5ag-v2` with
+routing features disabled; Phase 2 uses the routing-enabled variant on the
+same map. Each process writes separate logs, models, videos, and TensorBoard output under
 `results/parallel-<timestamp>`. Both default to `cuda:0`; on a host with two
 GPUs, use `PHASE0_DEVICE=cuda:0 PHASE2_DEVICE=cuda:1`. Set `PYTHON_BIN` or
 `RUN_DIR` to override the Python executable or output directory. The script

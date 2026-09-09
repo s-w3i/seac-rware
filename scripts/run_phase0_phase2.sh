@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -u
 
-# Run the two experiments independently. Override these for a multi-GPU host:
+# Run the two experiments independently on the same five-robot map. Override
+# these for a multi-GPU host:
 #   PHASE0_DEVICE=cuda:0 PHASE2_DEVICE=cuda:1 ./scripts/run_phase0_phase2.sh
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
@@ -38,7 +39,7 @@ run_experiment() {
 echo "Starting Phase 0 (original SEAC) and Phase 2 (routing SEAC)."
 echo "Results: ${RUN_DIR}"
 
-run_experiment phase0 rware1 "${PHASE0_DEVICE}" "${RUN_DIR}/phase0" &
+run_experiment phase0 rware_custom_5ag "${PHASE0_DEVICE}" "${RUN_DIR}/phase0" &
 PHASE0_PID=$!
 run_experiment phase2 rware_custom_5ag_routing "${PHASE2_DEVICE}" "${RUN_DIR}/phase2" &
 PHASE2_PID=$!

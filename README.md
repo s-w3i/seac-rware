@@ -129,6 +129,18 @@ phase/cycle means by completion counts, and calculate throughput from total
 cycles divided by total episode steps. Wall-clock FPS remains a separate measure.
 Statistics reset with the episode; unfinished cycles do not enter duration means.
 
+To launch Phase 0 and Phase 2 as separate training processes on a host machine:
+
+```bash
+./scripts/run_phase0_phase2.sh
+```
+
+Each process writes separate logs, models, videos, and TensorBoard output under
+`results/parallel-<timestamp>`. Both default to `cuda:0`; on a host with two
+GPUs, use `PHASE0_DEVICE=cuda:0 PHASE2_DEVICE=cuda:1`. Set `PYTHON_BIN` or
+`RUN_DIR` to override the Python executable or output directory. The script
+waits for both processes and exits nonzero if either run fails.
+
 Verification from the workspace root, without changing package installations:
 
 ```bash

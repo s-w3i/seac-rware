@@ -188,8 +188,8 @@ def test_five_robot_cycle_and_episode_totals():
     assert phases == [TaskPhase.AUTO_PICKUP, TaskPhase.AUTO_DELIVERY, TaskPhase.AUTO_DROP]
     # End one step later and verify completed-only means and new unfinished task.
     w.max_steps = w._cur_steps + 1
-    _, _, done, _, info = wrapped.step([0]*5)
-    assert done
+    _, _, terminated, truncated, info = wrapped.step([0]*5)
+    assert not terminated and truncated
     summary = info['episode_metrics']
     for key in expected:
         assert summary[key] == expected[key] + np.sum(info[key])

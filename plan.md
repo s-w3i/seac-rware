@@ -1,7 +1,14 @@
 # Implementation plan: shared PPO and MAPPO for SEAC–RWARE
 
-Status: revised implementation specification only; PPO/MAPPO code and launcher are not implemented or runnable yet.
-Delivery branch: `codex/ppo-mappo-readiness`. This delivery changes only this plan.
+Status: all four variants (PPO, PPO-GRU, MAPPO, MAPPO-GRU) and the GPU launcher are implemented and smoke-validated.
+Delivery branch: `codex/ppo-mappo-readiness`.
+
+The design below records the original specification. The subsequently approved
+implementation includes four named configs and a Python launcher with
+`--jobs-per-gpu 1|2`; use the [README](README.md#ppo-ppo-gru-mappo-and-mappo-gru)
+for verified commands, exact defaults, checkpoint semantics and validation results.
+Research-study checklist items below remain future experiments, not claims of
+completed training. Four-job capacity benchmarking and long training are deferred.
 Prepared: 2026-09-13.
 Repository baseline: [s-w3i/seac-rware, commit 56238fc](https://github.com/s-w3i/seac-rware/tree/56238fc8b699e257effaa48a8638f153faec69c0).
 

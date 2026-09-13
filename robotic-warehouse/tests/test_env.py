@@ -381,11 +381,11 @@ def test_time_limit(time_limit):
     env.reset()
 
     for _ in range(time_limit - 1):
-        _, _, done, _, _ = env.step(env.action_space.sample())
-        assert not done
+        _, _, terminated, truncated, _ = env.step(env.action_space.sample())
+        assert not terminated and not truncated
 
-    _, _, done, _, _ = env.step(env.action_space.sample())
-    assert done
+    _, _, terminated, truncated, _ = env.step(env.action_space.sample())
+    assert not terminated and truncated
 
 
 def test_inactivity_2(env_0):

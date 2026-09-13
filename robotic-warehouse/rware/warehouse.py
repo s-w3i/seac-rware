@@ -1350,14 +1350,9 @@ class Warehouse(gym.Env):
             self._cur_inactive_steps += 1
         self._cur_steps += 1
 
-        if (
-            self.max_inactivity_steps
-            and self._cur_inactive_steps >= self.max_inactivity_steps
-        ) or (self.max_steps and self._cur_steps >= self.max_steps):
-            done = True
-        else:
-            done = False
-        truncated = False
+        done = bool(self.max_inactivity_steps and
+                    self._cur_inactive_steps >= self.max_inactivity_steps)
+        truncated = bool(self.max_steps and self._cur_steps >= self.max_steps)
 
         new_obs = tuple([self._make_obs(agent) for agent in self.agents])
         info = self._get_info()

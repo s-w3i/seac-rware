@@ -89,6 +89,13 @@ class Policy(nn.Module):
         value, _, _ = self.base(inputs, rnn_hxs, masks)
         return value
 
+    def advance_recurrent_state(self, inputs, rnn_hxs, masks):
+        """Advance this policy on an observation stream without selecting an action."""
+        if not self.is_recurrent:
+            return rnn_hxs
+        _, _, rnn_hxs = self.base(inputs, rnn_hxs, masks)
+        return rnn_hxs
+
     def evaluate_actions(self, inputs, rnn_hxs, masks, action):
         value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)

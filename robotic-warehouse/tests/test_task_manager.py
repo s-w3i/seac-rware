@@ -65,9 +65,10 @@ def test_visible_automatic_task_cycle_and_reward():
         "pickup_time",
         "delivery_time",
         "return_time",
-        "path_length",
-        "wait_steps",
-        "conflict_attempts",
+            "path_length",
+            "wait_steps",
+            "movement_attempts",
+            "conflict_attempts",
         "movement_denied",
         "deadlock_events",
     }

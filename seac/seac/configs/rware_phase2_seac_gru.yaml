@@ -1,0 +1,10 @@
+env_name: rware-custom-5ag-routing-v2
+trainer: seac
+num_env_steps: 20000000
+time_limit: 500
+episodes_per_eval: 100
+monitor_eval_seed: 10000
+final_eval_seed: 20000
+algorithm:
+  recurrent_policy: true
+  device: cuda:0

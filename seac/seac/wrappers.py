@@ -35,7 +35,7 @@ class RecordEpisodeStatistics(gym.Wrapper):
         self.episode_length += 1
         metric_names = ("completed_cycles", "deliveries", "pickups", "pickup_time",
                         "delivery_time", "return_time", "cycle_time", "path_length",
-                        "wait_steps", "conflict_attempts", "movement_denied",
+                        "wait_steps", "movement_attempts", "conflict_attempts", "movement_denied",
                         "robot_blocked", "deadlock_events", "reward_progress", "reward_step",
                         "reward_conflict", "reward_stall", "reward_event")
         for key in metric_names:

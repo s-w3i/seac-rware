@@ -109,6 +109,7 @@ class A2C:
     def update(
         self,
         storages,
+        cross_recurrent_hidden_states,
         value_loss_coef,
         entropy_coef,
         seac_coef,
@@ -140,15 +141,16 @@ class A2C:
 
         # calculate prediction loss for the OTHER actor
         other_agent_ids = [x for x in range(len(storages)) if x != self.agent_id]
-        seac_policy_loss = 0
-        seac_value_loss = 0
+        seac_policy_loss = torch.zeros((), device=device)
+        seac_value_loss = torch.zeros((), device=device)
+        importance_sampling_ratios = []
         for oid in other_agent_ids:
 
             other_values, logp, _, _ = self.model.evaluate_actions(
                 storages[oid].obs[:-1].view(-1, *obs_shape),
-                storages[oid]
-                .recurrent_hidden_states[0]
-                .view(-1, self.model.recurrent_hidden_state_size),
+                cross_recurrent_hidden_states[oid].view(
+                    -1, self.model.recurrent_hidden_state_size
+                ),
                 storages[oid].masks[:-1].view(-1, 1),
                 storages[oid].actions.view(-1, action_shape),
             )
@@ -161,6 +163,7 @@ class A2C:
             importance_sampling = (
                 logp.exp() / (storages[oid].action_log_probs.exp() + 1e-7)
             ).detach()
+            importance_sampling_ratios.append(importance_sampling.mean())
             # importance_sampling = 1.0
             seac_value_loss += (
                 importance_sampling * other_advantage.pow(2)
@@ -178,17 +181,24 @@ class A2C:
             + seac_coef * value_loss_coef * seac_value_loss
         ).backward()
 
-        nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
+        gradient_norm = nn.utils.clip_grad_norm_(
+            self.model.parameters(), max_grad_norm
+        )
 
         self.optimizer.step()
 
-        return {
+        result = {
             "policy_loss": policy_loss.item(),
             "value_loss": value_loss_coef * value_loss.item(),
             "dist_entropy": entropy_coef * dist_entropy.item(),
-            "importance_sampling": importance_sampling.mean().item(),
             "seac_policy_loss": seac_coef * seac_policy_loss.item(),
             "seac_value_loss": seac_coef
             * value_loss_coef
             * seac_value_loss.item(),
+            "gradient_norm": float(gradient_norm),
         }
+        if other_agent_ids:
+            result["importance_sampling"] = torch.stack(
+                importance_sampling_ratios
+            ).mean().item()
+        return result

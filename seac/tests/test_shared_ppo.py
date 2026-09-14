@@ -301,8 +301,18 @@ def test_sacred_entrypoint_metadata_resume_and_overwrite(tmp_path):
     cmd = [sys.executable, str(ROOT / 'seac/seac/train_shared.py'), 'with', 'mappo_gru_routing',
            'device=cpu', 'num_envs=1', 'rollout_steps=4', 'ppo_epochs=1', 'num_minibatches=1',
            'eval_steps=2', 'eval_seeds=[1000]']
-    subprocess.run(cmd + ['num_env_steps=8', f'run_dir={first}'], check=True,
-                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    completed = subprocess.run(cmd + ['num_env_steps=8', f'run_dir={first}'], check=True,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    metrics = [json.loads(line) for line in (first / 'metrics.jsonl').read_text().splitlines()]
+    for row in metrics:
+        line = next(line for line in completed.stdout.splitlines() if f"steps={row['env_steps']} " in line)
+        expected_mean = sum(row['individual_reward_sum']) / (4 * 1 * 5)
+        assert row['team_reward_mean'] == pytest.approx(expected_mean, abs=1e-7)
+        assert f"team_reward_mean={row['team_reward_mean']:.6f}" in line
+        robot_rewards = ', '.join(f'{value:.4f}' for value in row['individual_reward_sum'])
+        assert f'reward_sum_per_robot=[{robot_rewards}]' in line
+        for key in ('reward_progress', 'reward_step', 'reward_conflict', 'reward_stall', 'reward_event'):
+            assert f'{key}={row[key]:.4f}' in line
     provenance = json.loads((first / 'provenance.json').read_text())
     assert provenance['actual_layout']['grid_size'] == [10, 6]
     assert len(provenance['map_sha256']) == 64

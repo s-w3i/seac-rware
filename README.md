@@ -245,6 +245,14 @@ Launcher outputs live under
 and a `train/` subdirectory for training artifacts. Each child has independent
 Sacred and TensorBoard directories, checkpoints and metrics.
 
+Each model's `train.log` progress line also prints `team_reward_mean` (the
+mean of fleet-mean rewards across the rollout's environment steps),
+`reward_sum_per_robot` (five rollout totals, in robot order), and
+`reward_components_sum` (each component summed across all robots and steps).
+These are rollout statistics, not average episode returns. `team_reward_mean`
+is also recorded in JSON metrics and TensorBoard. The top-level launcher log
+contains launcher messages; model progress is in the individual `train.log` files.
+
 ### Checkpoints, resume and evaluation
 
 Each training directory contains `last.pt`, `best.pt`, an actor-only `actor.pt`,

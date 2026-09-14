@@ -200,6 +200,7 @@ def train(_config, _run):
                            updates=updates, collection_seconds=collection_seconds,
                            peak_gpu_memory_bytes=torch.cuda.max_memory_allocated(device) if device.type == 'cuda' else 0,
                            individual_reward_sum=data['rewards'].sum((0, 1)).cpu().tolist(),
+                           team_reward_mean=float(data['rewards'].mean()),
                            wall_seconds=time.perf_counter() - started)
             metrics['environment_steps_per_second'] = config['num_envs'] * config['rollout_steps'] / (collection_seconds + metrics['update_seconds'])
             for key in infos[0]:
@@ -211,7 +212,13 @@ def train(_config, _run):
             for key, value in metrics.items():
                 if isinstance(value, (int, float)):
                     writer.add_scalar(key, value, steps)
-            print(f"{config['method']}{'_gru' if config['recurrent'] else ''} steps={steps} actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} KL={metrics['approx_kl']:.5f}", flush=True)
+            robot_rewards = ', '.join(f'{reward:.4f}' for reward in metrics['individual_reward_sum'])
+            components = ', '.join(f'{key}={metrics[key]:.4f}' for key in sorted(metrics)
+                                   if key.startswith('reward_'))
+            print(f"{config['method']}{'_gru' if config['recurrent'] else ''} steps={steps} "
+                  f"actor={metrics['actor_loss']:.4f} critic={metrics['critic_loss']:.4f} "
+                  f"KL={metrics['approx_kl']:.5f} team_reward_mean={metrics['team_reward_mean']:.6f} "
+                  f"reward_sum_per_robot=[{robot_rewards}] reward_components_sum=[{components}]", flush=True)
             final = steps >= config['num_env_steps']
             if steps >= next_eval or final:
                 rows = evaluate_actor(learner.actor, config['env_name'], config['eval_seeds'], config['eval_steps'])

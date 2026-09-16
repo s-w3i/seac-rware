@@ -1,0 +1,4 @@
+method: mappo
+recurrent: true
+ccpd_mode: successful
+num_env_steps: 20000000

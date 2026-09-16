@@ -18,6 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from evaluate_shared import evaluate_actor
 from shared_envs import SharedEnvs, STATE_SCHEMA
 from shared_ppo import SharedPPO
+from shared_ccpd import DEFAULTS as CCPD_DEFAULTS, DETECTOR_VERSION, enabled as ccpd_enabled, validate as validate_ccpd
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULTS = dict(env_name='rware-custom-5ag-routing-v2', method='shared_ppo', recurrent=False,
@@ -27,12 +28,12 @@ DEFAULTS = dict(env_name='rware-custom-5ag-routing-v2', method='shared_ppo', rec
                 max_grad_norm=.5, target_kl=.02, sequence_length=32, burn_in=16,
                 eval_interval_env_steps=250000, save_interval_env_steps=250000,
                 eval_seeds=list(range(1000, 1004)), eval_steps=500, run_dir=None, resume=None,
-                deterministic=True)
+                deterministic=True, **CCPD_DEFAULTS)
 RESUME_OVERRIDES = {'run_dir', 'resume', 'device', 'num_env_steps',
                     'save_interval_env_steps', 'eval_interval_env_steps'}
 ex = Experiment('shared_baselines')
 ex.add_config(DEFAULTS)
-for name in ('shared_ppo_routing', 'shared_ppo_gru_routing', 'mappo_routing', 'mappo_gru_routing'):
+for name in ('shared_ppo_routing', 'shared_ppo_gru_routing', 'mappo_routing', 'mappo_gru_routing', 'mappo_gru_ccpd_routing'):
     ex.add_named_config(name, str(Path(__file__).parent / 'configs' / (name + '.yaml')))
 
 
@@ -63,6 +64,7 @@ def validate(config):
         raise ValueError('seed must be a nonnegative integer')
     if not isinstance(config['recurrent'], bool) or not isinstance(config['deterministic'], bool):
         raise ValueError('recurrent and deterministic must be booleans')
+    validate_ccpd(config)
 
 
 @ex.config_hook
@@ -93,7 +95,8 @@ def checkpoint(learner, config, architecture, steps, updates, best):
 def restore(learner, path, config, architecture):
     saved = torch.load(path, map_location=learner.device, weights_only=False)
     # Only operational settings may change when continuing an existing optimizer.
-    mismatch = [k for k in DEFAULTS if k not in RESUME_OVERRIDES and saved['config'][k] != config[k]]
+    saved_config = dict(CCPD_DEFAULTS, **saved['config'])
+    mismatch = [k for k in DEFAULTS if k not in RESUME_OVERRIDES and saved_config[k] != config[k]]
     if saved['architecture'] != architecture or saved['state_schema'] != STATE_SCHEMA or mismatch:
         raise ValueError(f'Incompatible checkpoint/configuration: {mismatch}')
     learner.actor.load_state_dict(saved['actor'])
@@ -105,6 +108,7 @@ def restore(learner, path, config, architecture):
     torch.set_rng_state(saved['torch_rng'].cpu())
     if learner.device.type == 'cuda' and saved['cuda_rng']:
         torch.cuda.set_rng_state_all([s.cpu() for s in saved['cuda_rng']])
+    learner.update_number = saved['updates']
     return saved['env_steps'], saved['updates'], saved['best_score']
 
 
@@ -133,7 +137,8 @@ def train(_config, _run):
         if not torch.cuda.is_available():
             raise RuntimeError('CUDA requested but unavailable')
         torch.cuda.set_device(device)
-    envs = SharedEnvs(config['env_name'], config['num_envs'], config['seed'], config['time_limit'])
+    envs = SharedEnvs(config['env_name'], config['num_envs'], config['seed'], config['time_limit'],
+                      coordination_trace=ccpd_enabled(config))
     writer = None
     try:
         architecture = dict(obs_size=envs.obs.shape[-1], actions=int(envs.envs[0].action_space[0].n),
@@ -145,13 +150,15 @@ def train(_config, _run):
             steps, updates, best = restore(learner, config['resume'], config, architecture)
             # Fresh simulator/memory stream, reproducible from the saved progress.
             envs.close()
-            envs = SharedEnvs(config['env_name'], config['num_envs'], config['seed'] + steps, config['time_limit'])
+            envs = SharedEnvs(config['env_name'], config['num_envs'], config['seed'] + steps, config['time_limit'],
+                              coordination_trace=ccpd_enabled(config))
             previous_best = Path(config['resume']).resolve().parent / 'best.pt'
             if previous_best.is_file():
                 candidate = torch.load(previous_best, map_location='cpu', weights_only=False)
                 inherited_best = (candidate['architecture'] == architecture and
                                   candidate['state_schema'] == STATE_SCHEMA and
-                                  all(candidate['config'][k] == config[k] for k in DEFAULTS if k not in RESUME_OVERRIDES) and
+                                  all(dict(CCPD_DEFAULTS, **candidate['config'])[k] == config[k]
+                                      for k in DEFAULTS if k not in RESUME_OVERRIDES) and
                                   candidate['best_score'] == best and candidate['env_steps'] <= steps)
                 if inherited_best:
                     atomic_save(candidate, output / 'best.pt')
@@ -165,6 +172,7 @@ def train(_config, _run):
                       goals=sorted([int(x), int(y)] for x, y in warehouse.goals),
                       rack_homes=sorted([int(x), int(y)] for x, y in warehouse._rack_positions))
         provenance = dict(config=config, architecture=architecture, state_schema=STATE_SCHEMA,
+                          ccpd_detector_version=DETECTOR_VERSION,
                           git_commit=git_output('rev-parse', 'HEAD').strip(), git_status=git_output('status', '--short'),
                           map_sha256=hashlib.sha256(json.dumps(layout, sort_keys=True).encode()).hexdigest(),
                           actual_layout=layout,
@@ -183,6 +191,8 @@ def train(_config, _run):
         source_dir.mkdir()
         for source in Path(__file__).parent.glob('*shared*.py'):
             (source_dir / source.name).write_bytes(source.read_bytes())
+        simulator_source = ROOT / 'robotic-warehouse/rware/warehouse.py'
+        (source_dir / 'warehouse.py').write_bytes(simulator_source.read_bytes())
         launcher_source = ROOT / 'scripts/run_shared_baselines.py'
         (source_dir / launcher_source.name).write_bytes(launcher_source.read_bytes())
         writer = SummaryWriter(str(output / 'tensorboard'))
@@ -196,6 +206,8 @@ def train(_config, _run):
             metrics = learner.update(data)
             steps += config['num_envs'] * config['rollout_steps']
             updates += 1
+            for record in learner.ccpd_records:
+                append_json(output / 'coordination_events.jsonl', dict(update=updates, **record))
             metrics.update(kind='learning', env_steps=steps, agent_steps=steps * envs.obs.shape[1],
                            updates=updates, collection_seconds=collection_seconds,
                            peak_gpu_memory_bytes=torch.cuda.max_memory_allocated(device) if device.type == 'cuda' else 0,

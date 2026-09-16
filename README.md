@@ -325,3 +325,173 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest \
   seac/tests/test_shared_ppo.py seac/tests/test_shared_launcher.py \
   seac/tests/test_comparison.py robotic-warehouse/tests -q
 ```
+
+## CCPD v0: current-rollout successful-event learning
+
+`mappo_gru_ccpd_routing` adds a training-only auxiliary action loss to the
+existing MAPPO-GRU. The actor, centralized critic, 199-feature observations,
+reward, PPO update count and actor export format are unchanged. No replay buffer,
+new dependency or deployment-time event detector is used. The critic and runner
+remain specific to the current five-robot benchmark.
+
+Tracing is opt-in through `coordination_trace_enabled` on the simulator and
+`coordination_trace` on `SharedEnvs`. Records contain pre-step task/load/position,
+target, requested action, decision eligibility, local density, unsaturated
+blocking history, actual movement/conflict outcomes and raw distance changes.
+Distances before and after always use the same pre-step target/load context;
+automatic service produces zero navigation progress. The collector retains the
+sampled policy action even when service executes NOOP, and captures traces before
+episode reset. Neither observations nor the simulator RNG is changed.
+
+Events start on actual robot blocking. Resolution requires three conflict-free
+steps with at least one translation, within a 32-step horizon, then eight further
+confirmation steps. Confirmation must show net progress of at least one cell,
+valid distances, no conflict in its final three steps, and positive quality:
+
+```text
+Q = min(post-resolution progress, 4)
+    - 0.1 * resolution duration
+    - 0.5 * additional pre-resolution conflict steps
+    - 1.0 * confirmation conflict steps
+```
+
+Events cannot overlap for one robot or cross episode/rollout boundaries. Missing
+follow-up is censored; timed-out events are failed. Task changes do not produce
+distance jumps because progress sums only correctly paired per-step differences.
+These are v0 heuristics: the actor can succeed for reasons unrelated to its own
+actions, and the positive-advantage filter uses the existing **team** advantage.
+
+Only actions through provisional resolution are teaching candidates; confirmation
+steps label the outcome. Automatic service, denied forward requests and nonpositive
+**raw, pre-normalization** advantages are excluded. Selected actions reuse their
+existing GRU sequence, burn-in and reset context. Within each actor minibatch:
+
+```text
+actor loss = existing PPO actor loss + ccpd_coef * mean(-weight * log_prob)
+```
+
+Scores are divided by the selected-score mean and capped at 2. No critic loss,
+optimizer pass or reward is added. Empty selections use ordinary PPO. The existing
+actor KL stopping and gradient clipping apply to the combined update.
+
+| Configuration key | Default |
+|---|---:|
+| `ccpd_mode` | `off`; CCPD named config uses `successful` |
+| `ccpd_coef` | 0.01 |
+| `ccpd_max_sample_fraction` | 0.10 of eligible rollout decisions |
+| `ccpd_max_noop_fraction` | 0.25 of selected actions |
+| `ccpd_event_horizon` / `ccpd_clear_steps` / `ccpd_confirmation_steps` | 32 / 3 / 8 |
+| `ccpd_progress_cap` / `ccpd_progress_weight` | 4 / 1 |
+| `ccpd_duration_cost` / `ccpd_conflict_cost` / `ccpd_recurrence_cost` | 0.1 / 0.5 / 1 |
+| `ccpd_min_progress` / `ccpd_min_quality` | 1 / 0 |
+| `ccpd_trace_events` | false |
+
+Modes are `off`, `successful`, `all_conflict` and `random`. The latter two use
+fully observed conflict events or arbitrary eligible transitions respectively,
+with the same action restrictions. Each rollout's successful pool determines
+the feasible sample count and weight multiset for all three active modes.
+Sampling is without replacement and respects the NOOP cap. Controls randomly
+assign that weight multiset to their selected actions. Counts are comparable by
+rule, not identical across policies whose trajectories diverge. If there are no
+eligible successful actions, all three active modes skip the auxiliary update.
+Sampling has a separate generator derived from seed/update and does not advance
+the policy RNG.
+
+`ccpd_mode=off` or `ccpd_coef=0` bypasses CCPD collection/selection/loss. Old
+checkpoints missing CCPD settings resume with disabled defaults; active modes
+cannot be enabled by silently resuming a plain baseline. CCPD settings remain
+fixed during resume. The saved update count restores selection RNG indexing;
+environment and GRU state still restart according to the existing resume policy.
+
+Metrics include outcomes/rejection reasons, quality, resolution duration,
+recurrence, raw-advantage statistics, selected/NOOP fractions, auxiliary loss,
+main actor loss, and the weighted auxiliary/main magnitude ratio. A nearly zero
+main loss can make that ratio large; it is diagnostic, not an automatic weight
+controller. With `ccpd_trace_events=True`, `coordination_events.jsonl` contains
+up to 20 event traces per rollout for the first four updates. Provenance records
+the detector version, full resolved configuration and simulator/module snapshots.
+
+### Commands and later comparison protocol
+
+Run from `/home/utar/seac-rware`. Commands create new output directories and
+refuse to overwrite existing runs.
+
+To train all three CCPD seeds **at the same time**, with seed 0 on physical GPU 0
+and seeds 1 and 2 sharing physical GPU 1, run:
+
+```bash
+/home/utar/seac-rware/.venv/bin/python /home/utar/seac-rware/scripts/run_ccpd_seeds.py
+```
+
+This defaults to 20M steps per seed, enables bounded event traces, and writes
+separate `train.log`, checkpoints and metrics under
+`results/ccpd/mappo_gru_ccpd_routing/seed_<seed>/ccpd_v0_20m/`.
+Append `--dry-run` to inspect commands, or `--attempt <new-name>` for a fresh run.
+The script checks both GPUs before launch; its intentional sharing of GPU 1
+does not require `--allow-busy`. That flag is only for sharing with processes
+already running before launch. Ctrl+C or a failed child stops the other children
+owned by this launcher.
+
+```bash
+# Short standalone validation; substitute random/all_conflict/off for controls.
+.venv/bin/python seac/seac/train_shared.py with mappo_gru_ccpd_routing \
+  device=cpu num_env_steps=4096 ccpd_trace_events=True \
+  run_dir=results/ccpd_manual/smoke
+
+# Read-only bounded event audit of a trained baseline; no optimizer updates.
+.venv/bin/python scripts/audit_ccpd_events.py \
+  results/shared_baselines/mappo_gru_routing/seed_0/four_models_20m/train/best.pt \
+  --output results/ccpd_manual/event_audit
+
+# Inspect the later three-seed training commands without launching them.
+.venv/bin/python scripts/run_shared_baselines.py \
+  --models mappo_gru_ccpd_routing --gpus 0 1 --seeds 0 1 2 \
+  --num-env-steps 20000000 --attempt ccpd_v0_20m \
+  --output results/ccpd --dry-run
+
+# Full training, to run later: same command with --dry-run removed.
+# It trains from scratch, never loading the baseline used by the event audit.
+
+# Later held-out evaluation: default seeds 2000–2049, deterministic, 500 steps.
+# Repeat for seed_1/seed_2 and for both best.pt and last.pt of every method.
+.venv/bin/python seac/seac/evaluate_shared.py \
+  results/ccpd/mappo_gru_ccpd_routing/seed_0/ccpd_v0_20m/train/best.pt \
+  --output results/ccpd/evaluation/seed0_best.jsonl
+
+# Run every simulator/algorithm/launcher regression, including CCPD.
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest seac/tests robotic-warehouse/tests -q
+```
+
+The launcher still defaults to the original four models; CCPD must be selected
+explicitly and is assigned to its MAPPO GPU slot. The CCPD named config defaults
+to 20M steps, but the launcher budget is always explicit (its unchanged default
+is 2M). Match seeds 0–2, eight environments, 256-step rollouts, four PPO epochs,
+four minibatches, sequence length 32 and burn-in 16. Preserve validation seeds
+1000–1003, 500 steps and 250,000-step validation intervals. Select `best.pt` by
+validation throughput; report final `last.pt` results separately. Never select
+checkpoints or tune event thresholds using held-out test results.
+
+Later, evaluate CCPD, saved MAPPO-GRU and saved Shared-PPO-GRU on that same
+held-out suite. Report cycles/1k, completed-cycle durations, raw conflict proposals,
+movement denial, waiting, unfinished tasks and variation across training seeds.
+Run random/all-conflict controls afterward using identical budgets. No long
+training or comparative performance claim is part of this implementation.
+
+### CCPD validation results
+
+All **130 tests passed** with the existing Gymnasium reward-list warning.
+All four CPU modes completed 4,096 steps; GPU CCPD completed 8,192 steps/four
+updates with finite diagnostics and 41 selected teaching actions. Its peak
+PyTorch allocation was about 125.5 MiB. Actor and critic parameters changed,
+and the GPU export matched the full checkpoint after CPU reload.
+
+The read-only trained-policy audit covered 8,192 environment steps and found
+343 events: 263 successful, 47 failed and 33 censored, with 407 selected actions.
+Inspected examples included a turn after blocking followed by target progress,
+negative progress after delivery, recurrence during confirmation and a zero-quality
+resolution. The checkpoint's actor/critic parameters were unchanged. These counts
+validate data flow and labels, not CCPD's performance benefit.
+
+Disabled CCPD also matched the saved pre-CCPD learner's actor/critic parameters,
+environment observations and Torch RNG **bit for bit after three updates**.
+Detailed artifacts and the validation report are under `results/ccpd_validation/`.

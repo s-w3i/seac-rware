@@ -7,6 +7,7 @@ from torch.distributions import Categorical
 
 from shared_models import Actor, Network
 from shared_storage import batches, gae, replay, retain_history
+from shared_ccpd import enabled as ccpd_enabled, select_samples, event_records
 
 
 class SharedPPO:
@@ -21,6 +22,8 @@ class SharedPPO:
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=config['critic_lr'])
         self.actor_state = self.critic_state = self.reset = None
         self.actor_history = self.critic_history = None
+        self.update_number = 0
+        self.ccpd_records = []
 
     def tensor(self, value):
         return torch.as_tensor(value, device=self.device)
@@ -60,6 +63,11 @@ class SharedPPO:
                                   data['terminated'], data['truncated'], self.config['gamma'],
                                   self.config['gae_lambda'])
         data.update(advantages=advantages, returns=returns)
+        if ccpd_enabled(self.config):
+            data['coordination'] = {
+                key: np.stack([info['coordination'][key] for info in infos]).reshape(
+                    self.config['rollout_steps'], E, *infos[0]['coordination'][key].shape)
+                for key in infos[0]['coordination']}
         return data, infos, time.perf_counter() - start
 
     def streams(self, data, actor):
@@ -102,11 +110,18 @@ class SharedPPO:
             advantages = advantages.unsqueeze(-1).expand_as(data['log_probs'])
         advantages = advantages.flatten().clone()
         eligible = data['eligible'].flatten()
+        weights, ccpd_metrics = None, {}
+        self.ccpd_records = []
+        if ccpd_enabled(self.config):
+            weights, ccpd_metrics, events = select_samples(data, self.config, self.update_number)
+            if self.config['ccpd_trace_events'] and self.update_number < 4:
+                self.ccpd_records = list(event_records(data, events))
         if eligible.any():
             valid_adv = advantages[eligible]
             advantages = (advantages - valid_adv.mean()) / (valid_adv.std(unbiased=False) + 1e-8)
         actions, old_logs = data['actions'].flatten(), data['log_probs'].flatten()
         actor_losses, actor_norms, critic_losses, critic_norms = [], [], [], []
+        auxiliary_losses, auxiliary_ratios, main_losses = [], [], []
         epochs = 0
         for _ in range(self.config['ppo_epochs']):
             if not eligible.any():
@@ -122,6 +137,18 @@ class SharedPPO:
                 unclipped = ratio * advantages[idx]
                 clipped = ratio.clamp(1 - self.config['clip_epsilon'], 1 + self.config['clip_epsilon']) * advantages[idx]
                 loss = -torch.minimum(unclipped, clipped).mean() - self.config['entropy_coef'] * dist.entropy().mean()
+                if weights is not None:
+                    main_losses.append(float(loss.detach()))
+                    selected = weights[idx] > 0
+                    auxiliary = loss.new_zeros(())
+                    if selected.any():
+                        auxiliary = -(weights[idx][selected] * dist.log_prob(actions[idx])[selected]).mean()
+                    auxiliary_losses.append(float(auxiliary.detach()))
+                    auxiliary_ratios.append(float(self.config['ccpd_coef'] * auxiliary.detach().abs()
+                                                  / (loss.detach().abs() + 1e-8)))
+                    # An empty selection follows precisely the original PPO loss path.
+                    if selected.any():
+                        loss = loss + self.config['ccpd_coef'] * auxiliary
                 self.actor_optimizer.zero_grad()
                 loss.backward()
                 norm = torch.nn.utils.clip_grad_norm_(self.actor.parameters(), self.config['max_grad_norm'])
@@ -160,4 +187,11 @@ class SharedPPO:
                            critic_epochs=self.config['ppo_epochs'], valid_decision_fraction=float(eligible.float().mean()),
                            explained_variance=float(1 - (targets - data['values'].flatten()).var(unbiased=False) / variance) if variance > 1e-8 else 0.,
                            update_seconds=time.perf_counter() - start)
+        if weights is not None:
+            diagnostics.update(ccpd_metrics,
+                               ccpd_auxiliary_loss=float(np.mean(auxiliary_losses)) if auxiliary_losses else 0.,
+                               ccpd_weighted_auxiliary_loss=self.config['ccpd_coef'] * float(np.mean(auxiliary_losses)) if auxiliary_losses else 0.,
+                               ccpd_auxiliary_main_ratio=float(np.mean(auxiliary_ratios)) if auxiliary_ratios else 0.,
+                               actor_main_loss=float(np.mean(main_losses)) if main_losses else 0.)
+        self.update_number += 1
         return diagnostics

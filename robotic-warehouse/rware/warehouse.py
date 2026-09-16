@@ -296,6 +296,7 @@ class Warehouse(gym.Env):
         pickup_reward: float = 1.0,
         delivery_reward: float = 2.0,
         return_reward: float = 3.0,
+        coordination_trace_enabled: bool = False,
     ):
         """The robotic warehouse environment
 
@@ -382,6 +383,9 @@ class Warehouse(gym.Env):
         self.normalised_coordinates = normalised_coordinates
         self.task_manager_enabled = bool(task_manager_enabled)
         self.routing_features_enabled = bool(routing_features_enabled)
+        self.coordination_trace_enabled = bool(coordination_trace_enabled)
+        if self.coordination_trace_enabled and not self.routing_features_enabled:
+            raise ValueError("Coordination tracing requires routing features")
         if self.routing_features_enabled and (
             not self.task_manager_enabled or reward_type != RewardType.INDIVIDUAL
             or observation_type not in (ObservationType.FLATTENED, ObservationType.DICT) or msg_bits
@@ -1104,6 +1108,26 @@ class Warehouse(gym.Env):
             self._cycle_steps += 1
         before_positions = [(agent.x, agent.y) for agent in self.agents]
         before_directions = [agent.dir for agent in self.agents]
+        if self.coordination_trace_enabled:
+            positions = np.asarray(before_positions)
+            trace = dict(
+                agent_id=np.arange(self.n_agents),
+                episode_step=np.full(self.n_agents, self._cur_steps),
+                task_phase=np.asarray([phase.value for phase in phases]),
+                loaded=np.asarray([context[1] for context in contexts]),
+                position=positions.copy(),
+                orientation=np.asarray([direction.value for direction in before_directions]),
+                target=np.asarray([context[0] for context in contexts]),
+                requested_action=np.asarray([a.value if isinstance(a, Action) else int(np.asarray(a).item())
+                                             for a in actions], dtype=np.int64),
+                eligible=~automatic,
+                blocked_streak_before=self._blocked_streak.copy(),
+                local_robot_count=(np.abs(positions[:, None] - positions[None, :]).max(-1) <= 2).sum(-1) - 1,
+                distance_before=self._distances.copy(),
+                distance_after=self._distances.copy(),
+                progress=np.zeros(self.n_agents),
+                progress_valid=np.ones(self.n_agents, dtype=bool),
+            )
         requested_forward = np.array(
             [agent.req_action == Action.FORWARD for agent in self.agents], dtype=bool
         )
@@ -1322,6 +1346,11 @@ class Warehouse(gym.Env):
             for i, agent in enumerate(self.agents):
                 context = contexts[i]
                 after = previous[i] if automatic[i] else self._static_distance(after_positions[i], *context)
+                if self.coordination_trace_enabled:
+                    trace['distance_after'][i] = after
+                    trace['progress_valid'][i] = max(previous[i], after) < np.prod(self.grid_size)
+                    if not automatic[i] and trace['progress_valid'][i]:
+                        trace['progress'][i] = previous[i] - after
                 if not automatic[i] and max(previous[i], after) < np.prod(self.grid_size):
                     progress[i] = self.progress_weight * (previous[i] - after)
                 new_context = self._routing_context(i)
@@ -1343,6 +1372,11 @@ class Warehouse(gym.Env):
             rewards = sum(components.values())
             self._last_info.update(components, pickups=pickups, cycle_time=cycle_time,
                                    robot_blocked=robot_blocked.astype(np.int64))
+            if self.coordination_trace_enabled:
+                trace.update(position_after=np.asarray(after_positions), movement_success=path_length.copy(),
+                             movement_denied=movement_denied.copy(), robot_blocked=robot_blocked.copy(),
+                             conflict_attempts=conflict_attempts.copy(), blocked_streak=self._blocked_streak.copy())
+                self._last_info['coordination'] = trace
 
         if shelf_delivered:
             self._cur_inactive_steps = 0

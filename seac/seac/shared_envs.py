@@ -47,8 +47,9 @@ def centralized_state(w):
     return np.concatenate([maps.ravel(), np.asarray(records, np.float32)])
 
 
-def make_shared_env(env_name, time_limit=500):
-    env = gym.make(env_name, max_steps=None, max_inactivity_steps=None)
+def make_shared_env(env_name, time_limit=500, coordination_trace=False):
+    env = gym.make(env_name, max_steps=None, max_inactivity_steps=None,
+                   coordination_trace_enabled=coordination_trace)
     if time_limit:
         env = gym.wrappers.TimeLimit(env, time_limit)
     return RecordEpisodeStatistics(env)
@@ -68,8 +69,8 @@ class Transition:
 
 
 class SharedEnvs:
-    def __init__(self, env_name, num_envs, seed, time_limit=500):
-        self.envs = [make_shared_env(env_name, time_limit) for _ in range(num_envs)]
+    def __init__(self, env_name, num_envs, seed, time_limit=500, coordination_trace=False):
+        self.envs = [make_shared_env(env_name, time_limit, coordination_trace) for _ in range(num_envs)]
         self.obs = np.asarray([env.reset(seed=seed + i)[0]
                                for i, env in enumerate(self.envs)], np.float32)
         spaces = self.envs[0].observation_space
@@ -89,8 +90,11 @@ class SharedEnvs:
         eligible = self.decisions()
         executed = np.where(eligible, actions, 0)
         obs, final_obs, states, final_states, rewards, terms, truncs, infos = ([] for _ in range(8))
-        for env, action in zip(self.envs, executed):
+        for index, (env, action) in enumerate(zip(self.envs, executed)):
             observation, reward, term, trunc, info = env.step(action)
+            if 'coordination' in info:
+                # Preserve the sampled proposal even when service overrides it to NOOP.
+                info['coordination']['requested_action'] = np.asarray(actions[index]).copy()
             final_obs.append(np.asarray(observation, np.float32).copy())
             final_states.append(centralized_state(env.unwrapped))
             if term or trunc:

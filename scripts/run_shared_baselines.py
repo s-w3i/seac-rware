@@ -11,7 +11,8 @@ import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-MODELS = ('shared_ppo_routing', 'mappo_routing', 'shared_ppo_gru_routing', 'mappo_gru_routing')
+DEFAULT_MODELS = ('shared_ppo_routing', 'mappo_routing', 'shared_ppo_gru_routing', 'mappo_gru_routing')
+MODELS = (*DEFAULT_MODELS, 'mappo_gru_ccpd_routing')
 
 
 def plan_jobs(args):
@@ -116,9 +117,26 @@ def run_wave(jobs):
     return 1 if failed else 0
 
 
+def prepare_jobs(jobs, gpus, allow_busy, python):
+    """Validate the whole launch before creating outputs or starting training."""
+    existing = [j['run_dir'] for j in jobs if Path(j['run_dir']).exists()]
+    if existing:
+        raise FileExistsError('Existing attempts: ' + ', '.join(existing))
+    gpu_ids = resolve_gpus(gpus, allow_busy)
+    for gpu_uuid in gpu_ids.values():
+        probe_env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu_uuid)
+        subprocess.run([str(python), '-c',
+                        'import torch; assert torch.cuda.is_available() and torch.cuda.device_count()==1; torch.zeros(1,device="cuda:0")'],
+                       env=probe_env, check=True)
+    for job in jobs:
+        Path(job['run_dir']).mkdir(parents=True, exist_ok=False)
+        job['environment'] = dict(CUDA_VISIBLE_DEVICES=gpu_ids[job['physical_gpu']],
+                                  PHYSICAL_GPU_ID=job['physical_gpu'], OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--models', nargs='+', choices=MODELS, default=list(MODELS))
+    parser.add_argument('--models', nargs='+', choices=MODELS, default=list(DEFAULT_MODELS))
     parser.add_argument('--gpus', nargs=2, default=['0', '1'])
     parser.add_argument('--seeds', nargs='+', type=int, default=[0])
     parser.add_argument('--num-env-steps', type=int, default=2000000)
@@ -150,19 +168,7 @@ def main(argv=None):
             print(f"seed={job['seed']} wave={job['wave'] + 1} physical_gpu={job['physical_gpu']} "
                   f"CUDA_VISIBLE_DEVICES=<UUID-of-{job['physical_gpu']}> " + shlex.join(job['command']))
         return 0
-    existing = [j['run_dir'] for j in jobs if Path(j['run_dir']).exists()]
-    if existing:
-        raise FileExistsError('Existing attempts: ' + ', '.join(existing))
-    gpu_ids = resolve_gpus(args.gpus, args.allow_busy)
-    for gpu, gpu_uuid in gpu_ids.items():
-        probe_env = dict(os.environ, CUDA_VISIBLE_DEVICES=gpu_uuid)
-        subprocess.run([str(args.python), '-c',
-                        'import torch; assert torch.cuda.is_available() and torch.cuda.device_count()==1; torch.zeros(1,device="cuda:0")'],
-                       env=probe_env, check=True)
-    for job in jobs:
-        Path(job['run_dir']).mkdir(parents=True, exist_ok=False)
-        job['environment'] = dict(CUDA_VISIBLE_DEVICES=gpu_ids[job['physical_gpu']],
-                                  PHYSICAL_GPU_ID=job['physical_gpu'], OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
+    prepare_jobs(jobs, args.gpus, args.allow_busy, args.python)
     for seed in args.seeds:
         for wave in sorted({j['wave'] for j in jobs if j['seed'] == seed}):
             selected = [j for j in jobs if j['seed'] == seed and j['wave'] == wave]

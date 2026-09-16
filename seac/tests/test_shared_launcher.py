@@ -100,6 +100,11 @@ def test_dry_run_waves_venv_and_no_side_effects(tmp_path, capsys):
     assert not output.exists()
     assert launcher.main(['--dry-run', '--jobs-per-gpu', '2', '--output', str(output)]) == 0
     assert capsys.readouterr().out.count('wave=1') == 4
+    assert launcher.main(['--dry-run', '--models', 'mappo_gru_ccpd_routing', '--seeds', '0', '1', '2',
+                          '--num-env-steps', '20000000', '--output', str(output)]) == 0
+    commands = capsys.readouterr().out
+    assert commands.count('mappo_gru_ccpd_routing') == 6  # config and output path, per seed
+    assert commands.count('physical_gpu=1') == 3 and not output.exists()
     assert not output.exists()
 
 
@@ -122,3 +127,41 @@ def test_busy_and_visibility_preflight(monkeypatch):
     monkeypatch.setenv('CUDA_VISIBLE_DEVICES', '0')
     with pytest.raises(ValueError, match='inherited'):
         launcher.resolve_gpus(['0', '1'], True)
+
+
+def test_ccpd_three_seeds_share_one_concurrent_wave(tmp_path, monkeypatch, capsys):
+    monkeypatch.syspath_prepend(str(ROOT / 'scripts'))
+    import run_ccpd_seeds as ccpd
+    import run_shared_baselines as common
+    output = tmp_path / 'ccpd'
+    def no_gpu(*args):
+        raise AssertionError('Dry run must not probe GPUs')
+    monkeypatch.setattr(common, 'resolve_gpus', no_gpu)
+    assert ccpd.main(['--dry-run', '--output', str(output)]) == 0
+    text = capsys.readouterr().out
+    assert 'seed=0 physical_gpu=0' in text and 'seed=1 physical_gpu=1' in text
+    assert 'seed=2 physical_gpu=1' in text and text.count('num_env_steps=20000000') == 3
+    assert not output.exists()
+    monkeypatch.setattr(common, 'resolve_gpus', lambda *args: {'0': 'GPU-A', '1': 'GPU-B'})
+    probes = []
+    monkeypatch.setattr(common.subprocess, 'run', lambda *args, **kwargs: probes.append(kwargs['env']['CUDA_VISIBLE_DEVICES']))
+    def real_wave_with_standins(jobs):
+        assert [(j['seed'], j['physical_gpu']) for j in jobs] == [(0, '0'), (1, '1'), (2, '1')]
+        for j in jobs:
+            assert 'ccpd_trace_events=True' in j['command'] and 'num_env_steps=32' in j['command']
+            j['command'] = [sys.executable, '-c',
+                'import time,os,json; print(json.dumps(dict(start=time.time(),gpu=os.environ["CUDA_VISIBLE_DEVICES"])),flush=True); time.sleep(.4); print(time.time())']
+        assert common.run_wave(jobs) == 0
+        windows = []
+        for j, gpu in zip(jobs, ('GPU-A', 'GPU-B', 'GPU-B')):
+            lines = (Path(j['run_dir']) / 'train.log').read_text().splitlines()
+            start = json.loads(lines[0])
+            assert start['gpu'] == gpu and record(j)['exit_status'] == 0
+            windows.append((start['start'], float(lines[1])))
+        assert max(start for start, _ in windows) < min(end for _, end in windows)
+        return 0
+    monkeypatch.setattr(ccpd, 'run_wave', real_wave_with_standins)
+    assert ccpd.main(['--output', str(output), '--num-env-steps', '32']) == 0
+    assert probes == ['GPU-A', 'GPU-B']
+    with pytest.raises(FileExistsError):
+        ccpd.main(['--output', str(output)])

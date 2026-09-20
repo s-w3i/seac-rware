@@ -495,3 +495,27 @@ validate data flow and labels, not CCPD's performance benefit.
 Disabled CCPD also matched the saved pre-CCPD learner's actor/critic parameters,
 environment observations and Torch RNG **bit for bit after three updates**.
 Detailed artifacts and the validation report are under `results/ccpd_validation/`.
+
+## Frozen CCPD diagnostic protocol
+
+The original final-checkpoint comparison used validation seeds 1000–1003;
+its interpretation is corrected in `results/comparison/final_policy_comparison.md`.
+The staged diagnostic runner audits the nine existing runs, evaluates final and
+validation-selected best checkpoints on held-out seeds 2000–2049, tests reflected
+and rotated layouts and 10,000-step continuous operation, then trains the six
+matched `random`/`all_conflict` controls at 20M steps each. Seeds 3000–3049 remain
+reserved. No policy architecture, reward or task-demand changes are included.
+
+```bash
+PYTHONPATH=robotic-warehouse .venv/bin/python scripts/validate_ccpd.py all
+```
+
+Do not launch a second runner while one is active; the output directory is
+locked. Completed compatible evaluations are reused, source changes are rejected,
+and incomplete training attempts require explicit recovery. Training uses one
+process per GPU and refuses to share occupied GPUs. Detailed usage and artifacts
+are documented in [the diagnostic README](results/ccpd_diagnostic/README.md).
+Read `results/ccpd_diagnostic/status.json` for execution state and
+[the generated comparison](results/ccpd_diagnostic/comparison.md) for current
+results; interim reports explicitly identify missing experiments. The final
+report is generated automatically after control evaluation.

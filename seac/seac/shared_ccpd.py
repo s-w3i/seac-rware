@@ -14,7 +14,7 @@ DEFAULTS = dict(ccpd_mode='off', ccpd_coef=.01, ccpd_max_sample_fraction=.10,
                 ccpd_confirmation_steps=8, ccpd_progress_cap=4., ccpd_progress_weight=1.,
                 ccpd_duration_cost=.1, ccpd_conflict_cost=.5, ccpd_recurrence_cost=1.,
                 ccpd_min_progress=1., ccpd_min_quality=0., ccpd_trace_events=False)
-MODES = ('off', 'random', 'all_conflict', 'successful')
+MODES = ('off', 'random', 'all_conflict', 'successful', 'random_action_matched')
 
 
 def enabled(config):
@@ -162,7 +162,17 @@ def select_samples(data, config, update_number):
     sample_weights = scores[chosen]
     if len(chosen):
         sample_weights = np.minimum(sample_weights / sample_weights.mean(), 2.)
-    if config['ccpd_mode'] != 'successful':
+    if config['ccpd_mode'] == 'random_action_matched':
+        matched = []
+        for action in range(4):
+            count = int(np.sum(actions[chosen] == action))
+            pool = np.flatnonzero(candidate & (actions == action))
+            if len(pool) < count:
+                raise ValueError('Action-matched candidate pool cannot fill successful-selection quota')
+            matched.extend(rng.choice(pool, size=count, replace=False))
+        chosen = np.asarray(matched, dtype=np.int64)
+        sample_weights = rng.permutation(sample_weights)
+    elif config['ccpd_mode'] != 'successful':
         pool = candidate if config['ccpd_mode'] == 'random' else candidate & conflict_pool.reshape(-1)
         chosen = capped_sample(pool, actions, len(chosen), config['ccpd_max_noop_fraction'], rng)
         # Both pools are supersets of successful candidates and can fill its budget.

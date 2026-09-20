@@ -47,9 +47,10 @@ def centralized_state(w):
     return np.concatenate([maps.ravel(), np.asarray(records, np.float32)])
 
 
-def make_shared_env(env_name, time_limit=500, coordination_trace=False):
+def make_shared_env(env_name, time_limit=500, coordination_trace=False, layout=None):
     env = gym.make(env_name, max_steps=None, max_inactivity_steps=None,
-                   coordination_trace_enabled=coordination_trace)
+                   coordination_trace_enabled=coordination_trace,
+                   **({'layout': layout} if layout is not None else {}))
     if time_limit:
         env = gym.wrappers.TimeLimit(env, time_limit)
     return RecordEpisodeStatistics(env)

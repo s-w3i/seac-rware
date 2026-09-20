@@ -495,3 +495,80 @@ validate data flow and labels, not CCPD's performance benefit.
 Disabled CCPD also matched the saved pre-CCPD learner's actor/critic parameters,
 environment observations and Torch RNG **bit for bit after three updates**.
 Detailed artifacts and the validation report are under `results/ccpd_validation/`.
+
+## Frozen CCPD diagnostic protocol
+
+The original final-checkpoint comparison used validation seeds 1000–1003;
+its interpretation is corrected in `results/comparison/final_policy_comparison.md`.
+The staged diagnostic runner audits the nine existing runs, evaluates final and
+validation-selected best checkpoints on held-out seeds 2000–2049, tests reflected
+and rotated layouts and 10,000-step continuous operation, then trains the six
+matched `random`/`all_conflict` controls at 20M steps each. Seeds 3000–3049 remain
+reserved. No policy architecture, reward or task-demand changes are included.
+
+```bash
+PYTHONPATH=robotic-warehouse .venv/bin/python scripts/validate_ccpd.py all
+```
+
+Do not launch a second runner while one is active; the output directory is
+locked. Completed compatible evaluations are reused, source changes are rejected,
+and incomplete training attempts require explicit recovery. Training uses one
+process per GPU and refuses to share occupied GPUs. Detailed usage and artifacts
+are documented in [the diagnostic README](results/ccpd_diagnostic/README.md).
+Read `results/ccpd_diagnostic/status.json` for execution state and
+[the generated comparison](results/ccpd_diagnostic/comparison.md) for current
+results; interim reports explicitly identify missing experiments. The final
+report is generated automatically after control evaluation.
+
+## One-command CCPD investigation (isolated checkout)
+
+This checkout adds `random_action_matched` and read-only failure/selection
+analysis. The original experiment and its frozen sources stay under
+`/home/utar/seac-rware`. Use the original virtual environment; the new launcher
+explicitly resolves this checkout's simulator and supplies that path to children.
+No installation or new environment generation is required.
+
+Run from any directory:
+
+```bash
+/home/utar/seac-rware/.venv/bin/python /home/utar/seac-rware-ccpd-investigation/scripts/run_ccpd_investigation.py
+```
+
+The command waits for the original campaign to finish, verifies all prerequisite
+artifacts, analyzes existing learning histories, replays up to 21 adverse cases
+across five methods, audits selection on identical frozen rollouts, trains the
+8-run / 80M-step pilot, and evaluates and reports the results. Only free GPUs
+are used, one training process per GPU; unrelated processes are never stopped.
+Keep the command running in your terminal for the multi-hour experiment.
+
+Outputs live in `/home/utar/seac-rware/results/ccpd_investigation/`:
+
+- `comparison.md`, `next_steps.md`, `summary.json`: final results and screening decision.
+- `status.json`, `pipeline.log`: current stage and errors.
+- `analysis/`: learning-curve and auxiliary-diagnostic CSVs, evidence notes, selected cases and replay summaries.
+- `traces/`: compressed per-step robot timelines and verified episode summaries.
+- `selection/`: identical-rollout selection audits including action, robot, phase, density, event outcome and quality.
+- `training/`, `evaluation/`: separate pilot checkpoints, logs and episode results.
+- `manifest.json`: frozen code, dependency versions and prerequisite artifact hashes.
+- `validation/`: test results and the 4,096-step CPU smoke run.
+
+The pilot uses fresh seeds 0 and 1 at 10M steps for off, successful, random, and
+action-matched random selection. Its final checkpoints are evaluated on the
+original map (50 × 500 steps), each transformed map (20 × 500 steps), and long
+runs (10 × 10,000 steps). All episode seeds start at 2000; 3000–3049 remain unused.
+20M and 10M comparisons are reported separately. The action-matched mode preserves
+successful selection's exact per-action quotas and weight multiset on identical
+data; independently trained trajectories need not have identical selections.
+
+A recommendation to extend to a full-budget action-matched comparison requires
+fewer original-map conflicts in both pilot seeds, original-map throughput at
+least 98% of both random controls, and no increase in the long-run fraction of
+robot endpoints with cycle age ≥500. Two seeds and this 2% screening allowance do
+not establish equivalence or publication-level superiority. The launcher does
+not automatically extend the pilot budget.
+
+`--dry-run` prints the protocol without creating outputs. `--check` runs only
+regressions and the new mode's CPU smoke training. Completed work is reused only
+with matching inputs and integrity receipts. Incomplete training, interrupted
+artifacts, changed sources or modified completed results stop with an explicit
+error; they are never silently resumed, overwritten or counted as complete.

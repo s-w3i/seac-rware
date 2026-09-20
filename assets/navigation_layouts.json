@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "layouts": [
+    {
+      "id": "original",
+      "family": "original",
+      "path": "navigation_original.map",
+      "split": "train",
+      "weight": 1.0,
+      "sha256": "1db63c6416d69140e224e44ec6c94e87589bdaf82c05889a67aca762cdeb058b"
+    }
+  ]
+}

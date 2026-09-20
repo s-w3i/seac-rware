@@ -11,13 +11,13 @@ from shared_ccpd import enabled as ccpd_enabled, select_samples, event_records
 
 
 class SharedPPO:
-    def __init__(self, obs_size, actions, state_size, config, device):
+    def __init__(self, obs_size, actions, state_size, config, device, actor=None, critic=None):
         self.config, self.device = config, device
         self.central = config['method'] == 'mappo'
-        self.actor = Actor(obs_size, actions, 128, config['recurrent']).to(device)
-        self.critic = Network(state_size if self.central else obs_size, 1,
+        self.actor = (actor if actor is not None else Actor(obs_size, actions, 128, config['recurrent'])).to(device)
+        self.critic = (critic if critic is not None else Network(state_size if self.central else obs_size, 1,
                               256 if self.central else 128,
-                              config['recurrent'] and not self.central).to(device)
+                              config['recurrent'] and not self.central)).to(device)
         self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=config['actor_lr'])
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=config['critic_lr'])
         self.actor_state = self.critic_state = self.reset = None

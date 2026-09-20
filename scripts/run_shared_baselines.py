@@ -134,6 +134,20 @@ def prepare_jobs(jobs, gpus, allow_busy, python):
                                   PHYSICAL_GPU_ID=job['physical_gpu'], OMP_NUM_THREADS='1', MKL_NUM_THREADS='1')
 
 
+def free_gpus():
+    listing = subprocess.check_output(['nvidia-smi', '--query-gpu=index,uuid', '--format=csv,noheader'], text=True)
+    available = dict(line.replace(' ', '').split(',') for line in listing.splitlines() if line.strip())
+    restricted = os.environ.get('CUDA_VISIBLE_DEVICES')
+    allowed = None if restricted is None else {available.get(s.strip(), s.strip()) for s in restricted.split(',')}
+    permitted = {k: v for k, v in available.items() if allowed is None or v in allowed}
+    if not permitted:
+        raise RuntimeError('No CUDA GPU is permitted by the current environment')
+    processes = subprocess.check_output(['nvidia-smi', '--query-compute-apps=gpu_uuid,pid', '--format=csv,noheader'], text=True)
+    busy = {line.split(',')[0].strip() for line in processes.splitlines() if line.strip()}
+    return [(index, uuid) for index, uuid in sorted(permitted.items(), key=lambda pair: int(pair[0])) if uuid not in busy]
+
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--models', nargs='+', choices=MODELS, default=list(DEFAULT_MODELS))

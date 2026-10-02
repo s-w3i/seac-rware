@@ -2,6 +2,7 @@
 
 - Checksums verified for the runtime Python sources, all published model/source checkpoints, map and evidence.
 - Regression suite in the relocated release checkout: 188 passed, 3 CUDA-dependent skips (CPU sandbox). This included the nine pretrained-artifact/export tests. A further test of seed-0 wrapper child commands and the automatic-campaign guard passed separately.
+- Fresh shallow GitHub clone with isolated Python invocation: **186 passed, 6 skipped** after making test subprocess imports explicit. Skips: three CUDA checks, one local-archive check, and two historical-Git parity checks whose baseline commit is absent in a shallow clone.
 - Both methods completed disposable CPU smoke training through 1 and 50 agents, two updates each, with original Stage-1 sources. No production training was launched.
 - All eight actor-only exports (selected/final × 40/50 agents × two methods) matched their full checkpoint weights exactly and produced identical actions/log probabilities during simulator checks.
 - One complete original validation episode was re-run for **each** selected 50-agent model: scenario 100000, replicate 0, 5,000 steps. Every original episode field matched exactly except wall-clock inference timing. MAPPO completed 2,313 cycles; communication + CCPD completed 2,353. See `validation_replay_check.json`.

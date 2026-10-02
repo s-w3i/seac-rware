@@ -81,7 +81,7 @@ MAPF World is a separate project and is not included. Original upstream attribut
 ## Checks
 
 ```bash
-python -m pytest -q tests stage3_runtime/seac/tests stage3_runtime/robotic-warehouse/tests
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests stage3_runtime/seac/tests stage3_runtime/robotic-warehouse/tests
 ```
 
-Historical archive-only and CUDA-only checks may skip when their prerequisites are unavailable. Release tests compare actor-only and full checkpoint weights and action outputs, verify all checksums, and run both policies in the simulator.
+Historical archive/Git-history-only and CUDA-only checks may skip when their prerequisites are unavailable. Release tests compare actor-only and full checkpoint weights and action outputs, verify all checksums, and run both policies in the simulator.

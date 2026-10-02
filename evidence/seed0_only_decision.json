@@ -1,0 +1,10 @@
+{
+  "timestamp": 1790742356.654029,
+  "reason": "User requested stopping after seed 0 for exploratory comparison with MAPF World",
+  "action": "Terminated campaign launcher only; active seed-0 training worker left running",
+  "launcher_pid": 867010,
+  "preserved_worker_pid": 867065,
+  "seed_1": "not started; omitted by user decision",
+  "automatic_final_evaluation": "not launched",
+  "original_protocol": "preserved; this decision records reduced study scope"
+}

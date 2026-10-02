@@ -1,0 +1,24 @@
+[
+  {
+    "method": "local",
+    "agents": 50,
+    "checkpoint": "best",
+    "scenario": 100000,
+    "action_replicate": 0,
+    "steps": 5000,
+    "completed_cycles": 2313.0,
+    "comparison": "all original episode fields identical except wall-clock inference timing",
+    "matching_fields": 58
+  },
+  {
+    "method": "communicating_ccpd",
+    "agents": 50,
+    "checkpoint": "best",
+    "scenario": 100000,
+    "action_replicate": 0,
+    "steps": 5000,
+    "completed_cycles": 2353.0,
+    "comparison": "all original episode fields identical except wall-clock inference timing",
+    "matching_fields": 58
+  }
+]

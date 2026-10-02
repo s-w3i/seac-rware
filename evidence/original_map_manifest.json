@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "layouts": [{
+    "id": "fixed_40x20",
+    "family": "fixed_40x20",
+    "path": "/home/utar/seac-rware/candidates/map1_1_rware/map1_1_rware.map",
+    "split": "train",
+    "weight": 1.0,
+    "sha256": "11d6084e865626e525e6b6e391a206ebc105e3abded677344bac4e0739613c5e"
+  }]
+}

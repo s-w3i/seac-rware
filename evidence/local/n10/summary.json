@@ -1,0 +1,34 @@
+{
+  "status": "complete",
+  "progress_passed": true,
+  "condition": "local",
+  "seed": 0,
+  "agents": 10,
+  "completed_updates": 98,
+  "joint_steps": 200704,
+  "cumulative_env_steps": 401408,
+  "pretraining_joint_steps": 20000768,
+  "best_update": 49,
+  "best_rank": [
+    1,
+    0.0,
+    105.66000000000003,
+    -115.10000000000002,
+    -49
+  ],
+  "protocol_sha256": "ced2d7f460cb1759a6986b13d8965f6938234a8be4da31b48973eaccf1626e72",
+  "smoke": false,
+  "runtime": {
+    "elapsed_seconds": 4775.832108756527,
+    "training_seconds": 1556.0952352564782,
+    "validation_seconds": 3218.029959993437,
+    "peak_rss_bytes": 1555038208,
+    "peak_gpu_reserved_bytes": 819986432
+  },
+  "artifacts": {
+    "best.pt": "bad19924c647ededa3966254039ae50bc6864d9d21b6644995bd33944e54b3b9",
+    "last.pt": "90c0612aab97709b6aeb341720e43daf9a6bb63ae9321ae4182bca5eb1b57d1e",
+    "actor_best.pt": "8576808ea2e261e6c79dc4e55d1c833f4e0406f470f58734c62735e87d15e2eb",
+    "actor_last.pt": "47a0b34e7a1ac23d74ceeff2c45356827dabf18376240b2b82305cf341e4cad7"
+  }
+}

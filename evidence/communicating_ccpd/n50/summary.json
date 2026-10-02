@@ -1,0 +1,35 @@
+{
+  "status": "complete",
+  "progress_passed": true,
+  "condition": "communicating_ccpd",
+  "seed": 0,
+  "agents": 50,
+  "completed_updates": 683,
+  "joint_steps": 1398784,
+  "cumulative_env_steps": 4001792,
+  "pretraining_joint_steps": 20000768,
+  "best_update": 49,
+  "best_rank": [
+    1,
+    0.0,
+    473.21999999999997,
+    -128.0,
+    -49
+  ],
+  "protocol_sha256": "88b960f789ff0db5f4640078337f6c54d8239801709e0b99511577dd3dacf66d",
+  "smoke": false,
+  "runtime_sources_sha256": "74daa8bc7726f2f589b1093cca0ee435e04cd6217e698f336091f3f870ca6a59",
+  "runtime": {
+    "elapsed_seconds": 183607.74674911983,
+    "training_seconds": 90185.42884941027,
+    "validation_seconds": 93407.25202574767,
+    "peak_rss_bytes": 1611780096,
+    "peak_gpu_reserved_bytes": 4901044224
+  },
+  "artifacts": {
+    "best.pt": "bd257785589eaeb53440464089eeaf776b9c4fc8ba6927ba172061879f2accb2",
+    "last.pt": "4f43a8b9a3236d0c37320ed0c898d9b1f497b82b21f95890100a2201852ee4a1",
+    "actor_best.pt": "bd79cc4bdb61933e369e16e5b2749fc93546acd4c323060a126903d63b8ebe64",
+    "actor_last.pt": "7290d55d57616406f1a2b0a0b1a9aae0a3125626815b44b03f1a4eab63f7d919"
+  }
+}

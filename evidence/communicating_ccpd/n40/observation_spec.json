@@ -1,0 +1,63 @@
+{
+  "schema": "ego-navigation-v2-7x7",
+  "grid_shape": [
+    7,
+    7,
+    7
+  ],
+  "scalar_size": 18,
+  "grid_channels": [
+    "in_bounds",
+    "shelf",
+    "robot",
+    "heading_forward",
+    "heading_back",
+    "heading_left",
+    "heading_right"
+  ],
+  "scalars": [
+    "carrying",
+    "phase[6]",
+    "goal_bearing[right,forward]",
+    "goal_distance/(1+distance)",
+    "previous_action[4]",
+    "movement_success",
+    "movement_denied",
+    "stationary_age/64",
+    "cycle_age/1000"
+  ],
+  "packet_size": 20,
+  "actions": [
+    "wait",
+    "forward",
+    "left",
+    "right"
+  ],
+  "recurrent_size": 128,
+  "absolute_coordinates": false,
+  "critic_required": false,
+  "frame": "right,forward; raster row 0 is three cells forward; col 0 is three cells left",
+  "distance_units": "grid cells; Euclidean goal distance",
+  "age_clipping": {
+    "stationary": 64,
+    "cycle": 1000
+  },
+  "packet_fields": [
+    "relative_position[right,forward]/4",
+    "relative_heading[right,forward]",
+    "goal_bearing[right,forward]",
+    "goal_distance/(1+distance)",
+    "phase[6]",
+    "carrying",
+    "previous_action[4]",
+    "clipped_cycle_age/1000",
+    "packet_age/2"
+  ],
+  "channel": {
+    "range": 2,
+    "range_metric": "Chebyshev",
+    "delay": 1,
+    "expiry": 2,
+    "training_recipient_loss": 0.1
+  }
+}

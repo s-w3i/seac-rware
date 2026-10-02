@@ -1,0 +1,10 @@
+{
+  "source_checkout": "/home/utar/seac-rware-decentralized-navigation",
+  "source_commit": "56980d367dd4d1a73e2e15e632308de90d73480a",
+  "copied_uncommitted_files_sha256": {
+    "scripts/run_decentralized_navigation.py": "fc5d206c3d8378740ffaff0e28eeebe50fbcd2070d1ee77c391499f67c9e633e",
+    "seac/seac/navigation_policy.py": "5ea49289b2142d47c9e0e714279d63865b1e8b77af862252b7b88bd16577b6f0",
+    "seac/tests/test_navigation.py": "1877cc98296016c652e38599e467da5343d905a6767e38a9f1651a798f84e901"
+  },
+  "preserved_policy_copy": "seac/seac/navigation_policy_v1.py"
+}

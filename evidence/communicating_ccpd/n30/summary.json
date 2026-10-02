@@ -1,0 +1,34 @@
+{
+  "status": "complete",
+  "progress_passed": true,
+  "condition": "communicating_ccpd",
+  "seed": 0,
+  "agents": 30,
+  "completed_updates": 196,
+  "joint_steps": 401408,
+  "cumulative_env_steps": 1204224,
+  "pretraining_joint_steps": 20000768,
+  "best_update": 49,
+  "best_rank": [
+    1,
+    0.0,
+    300.26000000000005,
+    -122.0,
+    -49
+  ],
+  "protocol_sha256": "68075e20c39e63e0ade54f03fd8422ffc4369baf4a288e6b83d932e7c6dffafa",
+  "smoke": false,
+  "runtime": {
+    "elapsed_seconds": 26527.390157679096,
+    "training_seconds": 9738.168556548655,
+    "validation_seconds": 16784.706682622433,
+    "peak_rss_bytes": 1590337536,
+    "peak_gpu_reserved_bytes": 1885339648
+  },
+  "artifacts": {
+    "best.pt": "bb9c36e93b5863fcde7e3d9bb7fa8f03ebf9c3fa9838f84f5f1c24e71c6e4d09",
+    "last.pt": "78ac057c657d59b3bf2410a0bc5248d0d5e7a9dcb1a55c12babc667689b72aa6",
+    "actor_best.pt": "c91e639199f16e698ef0a60982d32a1ad3b5870acbbb2cfc8184fc7d1f1b70bc",
+    "actor_last.pt": "601a9206b2364b9a05808b1d0b681366b04042c353f039c20cb6883b18afd3b6"
+  }
+}
